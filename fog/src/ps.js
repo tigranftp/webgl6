@@ -7,8 +7,10 @@ var vsSource = [
     "",
     "varying float v_alpha;",
     "varying vec2 fragTexCoord;",
+    "varying vec2 globalPos;",
     "",
     "void main() {",
+    "    globalPos = a_position;",
     "    fragTexCoord = vertTexCoord;",
     "    gl_Position = vec4(a_position, 1.0, 1.0);",
     "    v_alpha = a_alpha;",
@@ -21,37 +23,30 @@ var fsSource = [
     "",
     "varying float v_alpha;",
     "varying vec2 fragTexCoord;",
-    'uniform sampler2D sampler;',
+    "uniform sampler2D sampler;",
+    "varying vec2 globalPos;",
     "",
     "void main() {",
     "    vec4 texture = texture2D(sampler, fragTexCoord);",
-    "    gl_FragColor = vec4(texture.rgb, v_alpha);",
+    "    gl_FragColor = vec4(texture.rgb, texture.a - (abs(globalPos[1]) + abs(globalPos[0])) *0.5);",
     "}"
 ].join("\n");
  
- 
 var Particle = function() {
-    // Позиция частицы
     this.x_ = 0;
     this.y_ = 0;
  
-    // Скорость движения частицы по x, y
     this.vx_ = 0;
     this.vy_ = 0;
  
-    // Ускорение частицы по x, y
     this.ax_ = 0;
     this.ay_ = 0;
  
-    // Прозрачность частицы
     this.alpha_ = 0;
-    // Изменение прозрачности в секунду
     this.vAlpha_ = 0;
  
-    // Размер частицы
     this.size_ = 0;
  
-    // Флаг, что частица активна
     this.active_ = false;
 };
  
@@ -59,59 +54,43 @@ var Particle = function() {
 Particle.prototype = {
     constructor : Particle
 }
- 
+
  
 var ParticleManager = function(numParticles, pps) {
-    // Всего float на частицу
     this.FLOATS_PER_PARTICLE = 30;
  
-    // Количество новых частиц в секунду
     this.pps_ = pps;
  
-    // Инициализируем массив частиц
     this.particles_ = new Array(numParticles);
  
     for (var i = 0; i < numParticles; ++i) {
         this.particles_[i] = new Particle();
     }
  
-    // Позиция эмиттера 
     this.emitterX_ = 0;
     this.emitterY_ = 0;
  
-    // Начальная скорость частицы
-    this.velInit_ = 0.25;
-    // Разброс (+-) начальной скорости частицы
-    this.velDisp_ = 0.07;
+    this.velInit_ = 0.35;
+    this.velDisp_ = 0.05;
  
-    // Начальное ускорение частицы
     this.accInit_ = 0.0;
-    // Разброс (+-) начального ускорения частицы
     this.accDisp_ = 0.025;
  
-    // Начальный размер частицы
-    this.sizeInit_ = 0.11;
-    // Разброс (+-) начального размера частицы
+    this.sizeInit_ = 0.4;
     this.sizeDisp_ = 0.05;
  
-    // Сила гравитации, направлена вниз
-    this.gravity_ = 0.0;
+    this.gravity_ = 0;
  
-    // Массив вершин
     this.vertices_ = new Float32Array(numParticles * this.FLOATS_PER_PARTICLE);
-    // Количество активных частиц
     this.numActiveParticles_ = 0;
  
-    // Вершинный буфер
     this.vbo_ = null;
  
-    // Шейдер, позиция в шейдере и прозрачность
     this.shader_ = null;
     this.positionId_ = -1;
     this.alphaId_ = -1;
     this.texture_ = -1;
  
-    // Время для вычисления количества новых частиц
     this.realTime_ = 0;
 }
  
@@ -120,41 +99,31 @@ ParticleManager.prototype = {
     constructor : ParticleManager,
  
  
-    // Активирование частицы
     add : function(particle) {
         if (particle.active_) {
             return;
         }
  
-        // Начальная позиция частицы совпадает с позицием эмиттера
         particle.x_ = this.emitterX_;
         particle.y_ = this.emitterY_;
  
-        // Вычисляем начальное ускорение частицы
         particle.ax_ = this.accInit_ + (Math.random() - 0.5) * this.accDisp_;
         particle.ay_ = this.accInit_ + (Math.random() - 0.5) * this.accDisp_;
  
-        // Направление движения частицы
         var angle = Math.random() * Math.PI * 2.0;
         var cosA = Math.cos(angle);
         var sinA = Math.sin(angle)
  
-        // Скорость движения
         var vel = (Math.random() - 0.5) * this.velDisp_;
  
-        // Скорость и направление движения частицы
         particle.vx_ = (this.velInit_ + vel) * cosA;
         particle.vy_ = (this.velInit_ + vel) * sinA;
  
-        // Размер частицы
         particle.size_ = this.sizeInit_ + (Math.random() - 0.5) * this.sizeDisp_;
  
-        // Начальная прозрачность
-        particle.alpha_ = 1.0;
-        // Уменьшение прозрачности в секунду
+        particle.alpha_ = 0.0;
         particle.vAlpha_ = 0.25 + Math.random();
  
-        // Активируем частицу
         particle.active_ = true;
     },
  
@@ -162,7 +131,6 @@ ParticleManager.prototype = {
     update : function(dt) {
         this.realTime_ += dt;
  
-        // Вычисляем количество новых частиц
         var newParticleCount = Math.floor(this.pps_ * this.realTime_);
  
         if (newParticleCount > 0) {
@@ -192,34 +160,27 @@ ParticleManager.prototype = {
                 continue;
             }
  
-            // Обновление скорости частицы
             particle.vx_ += particle.ax_ * dt;
             particle.vy_ += particle.ay_ * dt;
  
-            // Обновление позиции частицы
             particle.x_ += particle.vx_ * dt;
             particle.y_ += particle.vy_ * dt;
  
-            // Применение гравитации
             particle.vy_ -= this.gravity_ * dt;
  
-            // Изменение прозрачности
             particle.alpha_ -= particle.vAlpha_ * dt;
  
-            // Деактивация невидимой частицы
-            if (particle.alpha_ < 0) {
+            if (particle.alpha_ < -2) {
                 particle.active_ = false;
                 continue;
             }
  
-            // Выключаем частицы за пределами экрана
-            if (particle.x_ < -1.0 || particle.x_ > 1.0) {
+            if (particle.x_ < -2.0 || particle.x_ > 2.0) {
                 particle.active_ = false;
                 continue;
             }
  
-            // Выключаем частицы за пределами экрана
-            if (particle.y_ < -1.0) {
+            if (particle.y_ < -2.0) {
                 particle.active_ = false;
                 continue;
             }
@@ -325,6 +286,9 @@ ParticleManager.prototype = {
  
         gl.enableVertexAttribArray(this.texture_);
  
+        let sampler = gl.getUniformLocation(this.shader_, "sampler");
+        gl.uniform1i(sampler, 0);
+
         gl.drawArrays(gl.TRIANGLES, 0, this.numActiveParticles_ * 6);
  
         gl.disableVertexAttribArray(this.alphaId_);
